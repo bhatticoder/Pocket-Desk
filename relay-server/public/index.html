@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="Access and control your laptop remotely from your mobile device — like AnyDesk but in your browser">
+  <meta name="theme-color" content="#0a0a1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Mobile-Laptop Bridge — Remote Desktop</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/css/styles.css?v=3.2">
+</head>
+<body>
+  <!-- ═══════════════════ CONNECTION SCREEN ═══════════════════ -->
+  <div id="connectionScreen" class="screen active">
+    <div class="connection-bg">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="grid-overlay"></div>
+    </div>
+
+    <div class="connection-container">
+      <div class="logo-section">
+        <div class="logo-icon">
+          <svg viewBox="0 0 48 48" fill="none">
+            <rect x="4" y="4" width="40" height="28" rx="4" stroke="url(#grad1)" stroke-width="2.5"/>
+            <line x1="14" y1="32" x2="34" y2="32" stroke="url(#grad1)" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="20" y1="35" x2="28" y2="35" stroke="url(#grad1)" stroke-width="2" stroke-linecap="round"/>
+            <path d="M24 38 L20 44 L28 44 Z" fill="url(#grad2)" opacity="0.7"/>
+            <circle cx="36" cy="42" r="5" fill="url(#grad2)" stroke="url(#grad1)" stroke-width="1.5"/>
+            <path d="M34 42 L36 44 L39 40" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="grad1" x1="0" y1="0" x2="48" y2="48">
+                <stop offset="0%" stop-color="#6366f1"/>
+                <stop offset="100%" stop-color="#8b5cf6"/>
+              </linearGradient>
+              <linearGradient id="grad2" x1="0" y1="0" x2="48" y2="48">
+                <stop offset="0%" stop-color="#6366f1"/>
+                <stop offset="100%" stop-color="#a78bfa"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1 class="logo-title">Mobile-Laptop<br><span>Bridge</span></h1>
+        <p class="logo-subtitle">Remote Desktop Access</p>
+      </div>
+
+      <div class="connection-card">
+        <div class="card-header">
+          <div class="pulse-dot"></div>
+          <span>Enter Connection Code</span>
+        </div>
+        
+        <div class="code-input-group">
+          <div class="code-inputs" id="codeInputs">
+            <input type="tel" maxlength="1" class="code-digit" data-index="0" autofocus>
+            <input type="tel" maxlength="1" class="code-digit" data-index="1">
+            <input type="tel" maxlength="1" class="code-digit" data-index="2">
+            <div class="code-separator">—</div>
+            <input type="tel" maxlength="1" class="code-digit" data-index="3">
+            <input type="tel" maxlength="1" class="code-digit" data-index="4">
+            <input type="tel" maxlength="1" class="code-digit" data-index="5">
+          </div>
+        </div>
+
+        <button id="connectBtn" class="btn-connect" disabled>
+          <span class="btn-text">Connect</span>
+          <span class="btn-loader">
+            <svg class="spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="62" stroke-dashoffset="20"/></svg>
+          </span>
+        </button>
+
+        <div id="connectionError" class="error-message"></div>
+
+        <div class="divider">
+          <span>OR</span>
+        </div>
+
+        <p class="scan-hint">Open the desktop app and scan the QR code displayed there</p>
+      </div>
+
+      <div class="connection-features">
+        <div class="feature">
+          <div class="feature-icon">🖥️</div>
+          <div class="feature-text">Full Screen Access</div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🖱️</div>
+          <div class="feature-text">Mouse & Keyboard</div>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📁</div>
+          <div class="feature-text">File Transfer</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ REMOTE DESKTOP SCREEN ═══════════════════ -->
+  <div id="remoteScreen" class="screen">
+    <!-- Top Status Bar -->
+    <div id="statusBar" class="status-bar">
+      <div class="status-left">
+        <div class="status-indicator" id="statusIndicator">
+          <div class="status-dot"></div>
+          <span id="statusText">Connected</span>
+        </div>
+        <div class="mode-badge" id="modeBadge" title="Tap to toggle Touch/Trackpad">👆 Direct Touch</div>
+        <span class="status-fps" id="fpsCounter">0 FPS</span>
+      </div>
+      <div class="status-right">
+        <span class="status-latency" id="latencyDisplay">-- ms</span>
+        <button class="status-btn-kb" id="btnTopKeyboard" title="Open Keyboard to type">
+          <span>⌨️ Type</span>
+        </button>
+        <button class="status-btn" id="fullscreenBtn" title="Fullscreen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+          </svg>
+        </button>
+        <button class="status-btn" id="disconnectBtn" title="Disconnect">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18.36 6.64a9 9 0 11-12.73 0M12 2v10"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Remote Display Canvas -->
+    <div id="canvasContainer" class="canvas-container">
+      <div id="screenLockedBanner" class="screen-locked-banner" style="display:none">
+        <div class="banner-icon">⚠️</div>
+        <div class="banner-text">
+          <strong>Laptop Screen is Asleep / Locked</strong>
+          <span>Press any key on laptop or tap Wake Screen</span>
+        </div>
+        <button id="btnWakeScreen" class="banner-action-btn">Wake Screen</button>
+      </div>
+      <canvas id="remoteCanvas"></canvas>
+      <div id="cursorOverlay" class="cursor-overlay"></div>
+      <div id="touchFeedback" class="touch-feedback"></div>
+      <button id="btnFloatingKeyboard" class="floating-kb-btn" title="Tap to Type on Laptop">
+        <span>⌨️ Type</span>
+      </button>
+    </div>
+
+    <!-- AnyDesk-style Quick Action Bar with Horizontal Scroll Navigation -->
+    <div class="quick-bar-wrapper">
+      <button class="quick-bar-scroll-btn" id="btnQuickScrollLeft" title="Scroll options left">‹</button>
+      <div id="quickBar" class="quick-bar">
+        <button class="quick-btn highlight" id="btnQuickKeyboard" title="Open Keyboard to type text on laptop">
+          <span class="quick-badge">⌨️</span>
+          <span>Keyboard</span>
+        </button>
+
+        <button class="quick-btn" id="btnScreenFitMode" title="Switch Screen Fit Mode (Fit, Fill, Rotate)">
+          <span class="quick-badge" id="screenFitBadge">Fit</span>
+          <span id="screenFitLabel">Fit Screen</span>
+        </button>
+
+        <button class="quick-btn" id="btnStartMenu" title="Open Windows Start Menu to launch any app">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+            <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
+          </svg>
+          <span>Start</span>
+        </button>
+
+        <button class="quick-btn" id="btnDoubleTapToggle" title="Next tap will Double-Click (Opens apps/folders)">
+          <span class="quick-badge">2x</span>
+          <span>Double Click</span>
+        </button>
+
+        <button class="quick-btn" id="btnRightClickToggle" title="Next tap will Right-Click (Context Menu)">
+          <span class="quick-badge">R</span>
+          <span>Right Click</span>
+        </button>
+
+        <button class="quick-btn" id="btnPanModeToggle" title="Toggle 1-finger screen drag/pan mode">
+          <span class="quick-badge">✋</span>
+          <span>Pan Mode</span>
+        </button>
+
+        <button class="quick-btn" id="btnRotateView" title="Rotate remote screen 90° to fill full phone screen">
+          <span class="quick-badge">🔄</span>
+          <span>Rotate 90°</span>
+        </button>
+
+        <button class="quick-btn" id="btnFitWidth" title="Fit Width (Large readable desktop, scroll/pan up/down)">
+          <span class="quick-badge">↔</span>
+          <span>Fit Width</span>
+        </button>
+
+        <button class="quick-btn" id="btnZoomOut" title="Zoom Out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Zoom -</span>
+        </button>
+
+        <button class="quick-btn" id="btnZoomReset" title="Reset Zoom to Fit Screen">
+          <span id="zoomLevelDisplay" class="quick-badge">1.0x</span>
+          <span>Fit</span>
+        </button>
+
+        <button class="quick-btn" id="btnZoomIn" title="Zoom In (Enlarge small buttons)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Zoom +</span>
+        </button>
+
+        <button class="quick-btn" id="btnShowDesktop" title="Show Desktop (Minimize all windows)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+          <span>Desktop</span>
+        </button>
+      </div>
+      <button class="quick-bar-scroll-btn" id="btnQuickScrollRight" title="Scroll options right">›</button>
+    </div>
+
+    <!-- Quick Docked Typing Bar for instant text entry -->
+    <div id="quickTypingBar" class="quick-typing-bar" style="display: none;">
+      <input type="text" id="quickTypingInput" class="quick-typing-input" placeholder="Type here (instantly sends to laptop)..." autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="btnQuickTypeSend" class="btn-quick-type-send">Send</button>
+      <button id="btnQuickTypeEnter" class="btn-quick-type-key">↵ Enter</button>
+      <button id="btnQuickTypeBack" class="btn-quick-type-key">⌫</button>
+      <button id="btnQuickTypeClose" class="btn-quick-type-close" title="Close">✕</button>
+    </div>
+
+    <!-- Bottom Toolbar -->
+    <div id="toolbar" class="toolbar">
+      <button class="toolbar-btn" id="btnKeyboard" title="Keyboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="6" width="20" height="12" rx="2"/>
+          <line x1="6" y1="10" x2="6" y2="10" stroke-linecap="round"/>
+          <line x1="10" y1="10" x2="10" y2="10" stroke-linecap="round"/>
+          <line x1="14" y1="10" x2="14" y2="10" stroke-linecap="round"/>
+          <line x1="18" y1="10" x2="18" y2="10" stroke-linecap="round"/>
+          <line x1="8" y1="14" x2="16" y2="14" stroke-linecap="round"/>
+        </svg>
+        <span>Keyboard</span>
+      </button>
+      <button class="toolbar-btn active" id="btnMouse" title="Touch / Trackpad Mode">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+          <path d="M13 13l6 6"/>
+        </svg>
+        <span>Touch Mode</span>
+      </button>
+      <button class="toolbar-btn" id="btnFiles" title="File Transfer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <polyline points="9 15 12 12 15 15"/>
+        </svg>
+        <span>Files</span>
+      </button>
+      <button class="toolbar-btn" id="btnSettings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+        <span>Settings</span>
+      </button>
+      <button class="toolbar-btn" id="btnSpecialKeys" title="Special Keys">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="3"/>
+          <text x="12" y="15" text-anchor="middle" fill="currentColor" font-size="8" font-weight="bold" stroke="none">Fn</text>
+        </svg>
+        <span>Keys</span>
+      </button>
+    </div>
+
+    <!-- Keyboard Panel -->
+    <!-- Keyboard Panel -->
+    <div id="keyboardPanel" class="panel keyboard-panel">
+      <div class="panel-header">
+        <div class="panel-title-with-badge">
+          <span>⌨️ Virtual Keyboard</span>
+          <span class="live-typing-status" id="liveTypingStatus">● Live Sync</span>
+        </div>
+        <button class="panel-close" data-panel="keyboardPanel">✕</button>
+      </div>
+
+      <!-- Live Typing Bar -->
+      <div class="keyboard-input-box">
+        <input type="text" id="keyboardDirectInput" class="keyboard-direct-input" placeholder="Type here (instantly types on laptop)..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="btnClearDirectText" class="btn-clear-text" title="Clear">✕</button>
+        <button id="btnSendDirectText" class="btn-send-text">Send</button>
+      </div>
+
+      <div class="keyboard-toolbar-row">
+        <button class="soft-kb-trigger-btn" id="btnTriggerNativeKb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M8 16h8"/>
+          </svg>
+          <span>Open Phone Soft Keyboard</span>
+        </button>
+      </div>
+
+      <!-- Quick PC Navigation Keys -->
+      <div class="keyboard-quick-actions">
+        <button class="quick-key-btn" data-key="Escape">Esc</button>
+        <button class="quick-key-btn" data-key="Tab">Tab ⇥</button>
+        <button class="quick-key-btn" data-key="Meta">Win ⊞</button>
+        <button class="quick-key-btn" data-key="Backspace">⌫ Del</button>
+        <button class="quick-key-btn" data-key="Space">Space ␣</button>
+        <button class="quick-key-btn highlight" data-key="Enter">Enter ↵</button>
+      </div>
+
+      <!-- Full On-Screen Virtual Keyboard Keys -->
+      <div class="onscreen-keyboard">
+        <div class="osk-row">
+          <button class="osk-key" data-key="1">1</button>
+          <button class="osk-key" data-key="2">2</button>
+          <button class="osk-key" data-key="3">3</button>
+          <button class="osk-key" data-key="4">4</button>
+          <button class="osk-key" data-key="5">5</button>
+          <button class="osk-key" data-key="6">6</button>
+          <button class="osk-key" data-key="7">7</button>
+          <button class="osk-key" data-key="8">8</button>
+          <button class="osk-key" data-key="9">9</button>
+          <button class="osk-key" data-key="0">0</button>
+        </div>
+        <div class="osk-row">
+          <button class="osk-key" data-key="q">Q</button>
+          <button class="osk-key" data-key="w">W</button>
+          <button class="osk-key" data-key="e">E</button>
+          <button class="osk-key" data-key="r">R</button>
+          <button class="osk-key" data-key="t">T</button>
+          <button class="osk-key" data-key="y">Y</button>
+          <button class="osk-key" data-key="u">U</button>
+          <button class="osk-key" data-key="i">I</button>
+          <button class="osk-key" data-key="o">O</button>
+          <button class="osk-key" data-key="p">P</button>
+        </div>
+        <div class="osk-row">
+          <button class="osk-key" data-key="a">A</button>
+          <button class="osk-key" data-key="s">S</button>
+          <button class="osk-key" data-key="d">D</button>
+          <button class="osk-key" data-key="f">F</button>
+          <button class="osk-key" data-key="g">G</button>
+          <button class="osk-key" data-key="h">H</button>
+          <button class="osk-key" data-key="j">J</button>
+          <button class="osk-key" data-key="k">K</button>
+          <button class="osk-key" data-key="l">L</button>
+        </div>
+        <div class="osk-row">
+          <button class="osk-key" data-key="z">Z</button>
+          <button class="osk-key" data-key="x">X</button>
+          <button class="osk-key" data-key="c">C</button>
+          <button class="osk-key" data-key="v">V</button>
+          <button class="osk-key" data-key="b">B</button>
+          <button class="osk-key" data-key="n">N</button>
+          <button class="osk-key" data-key="m">M</button>
+          <button class="osk-key" data-key=".">.</button>
+          <button class="osk-key" data-key="-">-</button>
+        </div>
+        <div class="osk-row osk-nav-row">
+          <button class="osk-key osk-special" data-combo="Control+c">Ctrl+C</button>
+          <button class="osk-key osk-special" data-combo="Control+v">Ctrl+V</button>
+          <button class="osk-key osk-special" data-combo="Control+z">Ctrl+Z</button>
+          <button class="osk-key" data-key="ArrowLeft">←</button>
+          <button class="osk-key" data-key="ArrowUp">↑</button>
+          <button class="osk-key" data-key="ArrowDown">↓</button>
+          <button class="osk-key" data-key="ArrowRight">→</button>
+        </div>
+      </div>
+
+      <input type="text" id="hiddenInput" class="hidden-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+
+    <!-- Special Keys Panel -->
+    <div id="specialKeysPanel" class="panel special-keys-panel">
+      <div class="panel-header">
+        <span>Special Keys</span>
+        <button class="panel-close" data-panel="specialKeysPanel">✕</button>
+      </div>
+      <div class="special-keys-grid">
+        <button class="special-key" data-key="Escape">Esc</button>
+        <button class="special-key" data-key="Tab">Tab</button>
+        <button class="special-key" data-key="Delete">Del</button>
+        <button class="special-key" data-key="Backspace">⌫</button>
+        <button class="special-key" data-key="Enter">Enter</button>
+        <button class="special-key" data-key="Space">Space</button>
+        <button class="special-key modifier" data-key="Control" data-modifier="true">Ctrl</button>
+        <button class="special-key modifier" data-key="Alt" data-modifier="true">Alt</button>
+        <button class="special-key modifier" data-key="Shift" data-modifier="true">Shift</button>
+        <button class="special-key modifier" data-key="Meta" data-modifier="true">Win</button>
+        <button class="special-key" data-key="F1">F1</button>
+        <button class="special-key" data-key="F2">F2</button>
+        <button class="special-key" data-key="F3">F3</button>
+        <button class="special-key" data-key="F4">F4</button>
+        <button class="special-key" data-key="F5">F5</button>
+        <button class="special-key" data-key="F6">F6</button>
+        <button class="special-key" data-key="F7">F7</button>
+        <button class="special-key" data-key="F8">F8</button>
+        <button class="special-key" data-key="F9">F9</button>
+        <button class="special-key" data-key="F10">F10</button>
+        <button class="special-key" data-key="F11">F11</button>
+        <button class="special-key" data-key="F12">F12</button>
+        <button class="special-key" data-key="ArrowUp">↑</button>
+        <button class="special-key" data-key="ArrowDown">↓</button>
+        <button class="special-key" data-key="ArrowLeft">←</button>
+        <button class="special-key" data-key="ArrowRight">→</button>
+        <button class="special-key" data-key="Home">Home</button>
+        <button class="special-key" data-key="End">End</button>
+        <button class="special-key" data-key="PageUp">PgUp</button>
+        <button class="special-key" data-key="PageDown">PgDn</button>
+        <button class="special-key combo" data-combo="Control+c">Ctrl+C</button>
+        <button class="special-key combo" data-combo="Control+v">Ctrl+V</button>
+        <button class="special-key combo" data-combo="Control+x">Ctrl+X</button>
+        <button class="special-key combo" data-combo="Control+z">Ctrl+Z</button>
+        <button class="special-key combo" data-combo="Control+a">Ctrl+A</button>
+        <button class="special-key combo" data-combo="Control+s">Ctrl+S</button>
+        <button class="special-key combo" data-combo="Alt+Tab">Alt+Tab</button>
+        <button class="special-key combo" data-combo="Alt+F4">Alt+F4</button>
+        <button class="special-key combo" data-combo="Control+Alt+Delete">Ctrl+Alt+Del</button>
+        <button class="special-key combo" data-combo="Meta+d">Win+D</button>
+        <button class="special-key combo" data-combo="Meta+e">Win+E</button>
+        <button class="special-key combo" data-combo="Meta+l">Win+L</button>
+        <button class="special-key combo" data-combo="PrintScreen">PrtSc</button>
+        <button class="special-key combo" data-combo="Control+Shift+Escape">Task Mgr</button>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settingsPanel" class="panel settings-panel">
+      <div class="panel-header">
+        <span>Settings</span>
+        <button class="panel-close" data-panel="settingsPanel">✕</button>
+      </div>
+      <div class="settings-content">
+        <div class="setting-group">
+          <label class="setting-label">Stream Quality</label>
+          <div class="setting-options">
+            <button class="setting-option" data-quality="low">Low</button>
+            <button class="setting-option active" data-quality="medium">Medium</button>
+            <button class="setting-option" data-quality="high">High</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Frame Rate</label>
+          <div class="setting-slider">
+            <input type="range" id="fpsSlider" min="5" max="30" value="15" step="5">
+            <span id="fpsValue">15 FPS</span>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Touch Mode</label>
+          <div class="setting-options">
+            <button class="setting-option active" data-touchmode="trackpad">Trackpad</button>
+            <button class="setting-option" data-touchmode="direct">Direct Touch</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label class="setting-label">Show Toolbar</label>
+          <label class="toggle">
+            <input type="checkbox" id="toggleToolbar" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- File Manager Panel -->
+    <div id="filePanel" class="panel file-panel">
+      <div class="panel-header">
+        <span>File Transfer</span>
+        <button class="panel-close" data-panel="filePanel">✕</button>
+      </div>
+      <div class="file-content">
+        <div class="file-actions">
+          <button class="file-action-btn" id="btnDownloadFile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download from PC
+          </button>
+          <label class="file-action-btn" id="btnUploadFile">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="20" height="20">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Upload to PC
+            <input type="file" id="fileUploadInput" multiple hidden>
+          </label>
+        </div>
+        <div id="fileList" class="file-list">
+          <div class="file-list-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" width="48" height="48" opacity="0.3">
+              <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <p>No file transfers yet</p>
+          </div>
+        </div>
+        <div id="transferProgress" class="transfer-progress" style="display:none">
+          <div class="progress-info">
+            <span id="transferFileName">file.txt</span>
+            <span id="transferPercent">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ DISCONNECTED OVERLAY ═══════════════════ -->
+  <div id="disconnectedOverlay" class="overlay" style="display:none">
+    <div class="overlay-card">
+      <div class="overlay-icon disconnected-icon">
+        <svg viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="20" stroke="#ef4444" stroke-width="2" opacity="0.3"/>
+          <path d="M16 16l16 16M32 16L16 32" stroke="#ef4444" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h2>Connection Lost</h2>
+      <p id="disconnectReason">The remote desktop disconnected</p>
+      <button class="btn-connect" id="btnReconnect" onclick="location.reload()">
+        <span class="btn-text">Reconnect</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/connection.js?v=3.2"></script>
+  <script src="/js/display.js?v=3.2"></script>
+  <script src="/js/input.js?v=3.2"></script>
+  <script src="/js/files.js?v=3.2"></script>
+  <script src="/js/app.js?v=3.2"></script>
+</body>
+</html>

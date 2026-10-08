@@ -1,0 +1,18 @@
+{
+  "name": "mobile-laptop-bridge",
+  "version": "1.0.0",
+  "description": "Remote desktop access from mobile to laptop - like AnyDesk but web-based",
+  "private": true,
+  "workspaces": [
+    "relay-server",
+    "desktop-agent"
+  ],
+  "scripts": {
+    "start:relay": "cd relay-server && npm start",
+    "start:desktop": "cd desktop-agent && npm start",
+    "dev:relay": "cd relay-server && npm run dev",
+    "dev:desktop": "cd desktop-agent && npm run dev",
+    "start:internet": "node start-internet.js",
+    "install:all": "npm install --workspaces"
+  }
+}
