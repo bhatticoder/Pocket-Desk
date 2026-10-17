@@ -12,9 +12,11 @@ class DisplayManager {
     // Note: Do NOT use desynchronized: true here as it causes canvas repaint freezing on mobile GPU drivers
     this.ctx = canvas.getContext('2d', { alpha: false });
     
-    // Remote screen dimensions
+    // Remote screen dimensions - explicitly set canvas coordinate resolution
     this.screenWidth = 1920;
     this.screenHeight = 1080;
+    this.canvas.width = 1920;
+    this.canvas.height = 1080;
     
     // Viewport & Zoom state
     this.scale = 1;
@@ -41,6 +43,7 @@ class DisplayManager {
     this.frameBuffer = new Image();
     this.useBuffer = false;
     this.isRendering = false;
+    this.isDecoding = false;
     
     this.resizeObserver = null;
     this.animationFrame = null;
@@ -52,7 +55,10 @@ class DisplayManager {
    * Set the remote screen dimensions
    */
   setScreenSize(width, height) {
-    if (this.screenWidth === width && this.screenHeight === height) return;
+    if (!width || !height) return;
+    if (this.canvas.width === width && this.canvas.height === height && this.screenWidth === width && this.screenHeight === height) {
+      return;
+    }
     this.screenWidth = width;
     this.screenHeight = height;
     this.canvas.width = width;
@@ -61,9 +67,16 @@ class DisplayManager {
   }
 
   /**
-   * Render a frame from the desktop with lowest possible latency
+   * Render a frame from the desktop with lowest possible latency (supports 60 FPS & 2K)
    */
   renderFrame(frameData) {
+    if (!frameData || !frameData.image) return;
+
+    // Zero-lag decode pipeline: if already decoding a frame on mobile GPU, drop stale frame
+    if (this.isDecoding) {
+      return;
+    }
+
     const now = Date.now();
     
     // Calculate latency if timestamp provided
@@ -96,6 +109,7 @@ class DisplayManager {
 
     if (blob) {
       if (typeof createImageBitmap === 'function') {
+        this.isDecoding = true;
         createImageBitmap(blob)
           .then((bitmap) => {
             if (bitmap.width !== this.canvas.width || bitmap.height !== this.canvas.height) {
@@ -104,12 +118,14 @@ class DisplayManager {
             this.ctx.drawImage(bitmap, 0, 0);
             bitmap.close();
             this.lastFrameTime = Date.now();
+            this.isDecoding = false;
             
             if (this.onFrameRendered) {
               this.onFrameRendered();
             }
           })
           .catch((err) => {
+            this.isDecoding = false;
             console.warn('[Display] createImageBitmap fallback:', err.message);
             this._renderViaBlobUrl(blob);
           });
@@ -252,10 +268,14 @@ class DisplayManager {
 
     if (this.rotation === 90) {
       // Rotated 90 deg: width fits container height, height fits container width
+      this.canvas.style.maxWidth = 'none';
+      this.canvas.style.maxHeight = 'none';
       const scaleX = containerHeight / this.screenWidth;
       const scaleY = containerWidth / this.screenHeight;
       this.fitScale = Math.min(scaleX, scaleY);
     } else {
+      this.canvas.style.maxWidth = '100%';
+      this.canvas.style.maxHeight = '100%';
       const scaleX = containerWidth / this.screenWidth;
       const scaleY = containerHeight / this.screenHeight;
       this.fitScale = Math.min(scaleX, scaleY);
@@ -278,9 +298,6 @@ class DisplayManager {
     if (mode === 'rotate') {
       this.rotation = 90;
       this.isFitWidth = false;
-    } else if (mode === 'width') {
-      this.rotation = 0;
-      this.isFitWidth = true;
     } else if (mode === 'fill') {
       this.rotation = 0;
       this.isFitWidth = false;
@@ -296,11 +313,9 @@ class DisplayManager {
 
   cycleFitMode() {
     if (this.fitMode === 'fit') {
-      return this.setFitMode('fill');
-    } else if (this.fitMode === 'fill') {
       return this.setFitMode('rotate');
     } else if (this.fitMode === 'rotate') {
-      return this.setFitMode('width');
+      return this.setFitMode('fill');
     } else {
       return this.setFitMode('fit');
     }
@@ -311,7 +326,7 @@ class DisplayManager {
   }
 
   toggleFitWidth() {
-    return this.setFitMode(this.isFitWidth ? 'fit' : 'width');
+    return this.setFitMode(this.rotation === 90 ? 'fit' : 'rotate');
   }
 
   /**
@@ -351,7 +366,7 @@ class DisplayManager {
     if (this.zoomLevel > 1.25) {
       this.resetZoom();
     } else {
-      this.setZoom(2.2, focalX, focalY);
+      this.setZoom(2.0, focalX, focalY);
     }
     return this.zoomLevel;
   }
@@ -369,7 +384,7 @@ class DisplayManager {
    * Pan the view freely in any direction (360° unrestricted)
    */
   pan(deltaX, deltaY) {
-    if (this.zoomLevel <= 1.02 && !this.isFitWidth) return;
+    if (this.zoomLevel <= 1.02) return;
     this.panX += deltaX;
     this.panY += deltaY;
     this._applyTransform();
@@ -381,8 +396,8 @@ class DisplayManager {
       transformStr += 'rotate(90deg) ';
     }
 
-    if (this.zoomLevel > 1.02 || this.isFitWidth) {
-      const effZoom = this.isFitWidth ? Math.max(this.zoomLevel, 1.9) : this.zoomLevel;
+    if (this.zoomLevel > 1.02) {
+      const effZoom = this.zoomLevel;
       const containerRect = this.container.getBoundingClientRect();
       const baseW = parseFloat(this.canvas.style.width) || this.screenWidth;
       const baseH = parseFloat(this.canvas.style.height) || this.screenHeight;

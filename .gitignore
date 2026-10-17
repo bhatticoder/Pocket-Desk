@@ -38,3 +38,5 @@ temp_chrome_profile/
 desktop-agent/test_*.png
 desktop-agent/test_*.jpg
 relay-server/mobile_test_result.png
+current-url.txt
+

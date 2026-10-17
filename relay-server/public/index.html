@@ -445,17 +445,23 @@
       <div class="settings-content">
         <div class="setting-group">
           <label class="setting-label">Stream Quality</label>
-          <div class="setting-options">
-            <button class="setting-option" data-quality="low">Low</button>
-            <button class="setting-option active" data-quality="medium">Medium</button>
-            <button class="setting-option" data-quality="high">High</button>
+          <div class="setting-options grid-4">
+            <button class="setting-option" data-quality="low">Low (480p)</button>
+            <button class="setting-option" data-quality="medium">Medium (720p)</button>
+            <button class="setting-option active" data-quality="high">High (1080p)</button>
+            <button class="setting-option" data-quality="2k">2K (1440p) ✨</button>
           </div>
         </div>
         <div class="setting-group">
           <label class="setting-label">Frame Rate</label>
           <div class="setting-slider">
-            <input type="range" id="fpsSlider" min="5" max="30" value="15" step="5">
-            <span id="fpsValue">15 FPS</span>
+            <input type="range" id="fpsSlider" min="15" max="60" value="30" step="5">
+            <span id="fpsValue">30 FPS</span>
+          </div>
+          <div class="fps-presets" style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="setting-option fps-preset-btn" data-fps="15">15 FPS</button>
+            <button class="setting-option fps-preset-btn active" data-fps="30">30 FPS</button>
+            <button class="setting-option fps-preset-btn" data-fps="60">60 FPS ⚡</button>
           </div>
         </div>
         <div class="setting-group">

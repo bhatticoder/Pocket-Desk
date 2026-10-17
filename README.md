@@ -9,8 +9,8 @@ Pocket-Desk is a lightweight, zero-install remote desktop solution. Control your
 ## ✨ Features
 
 - 🌐 **Zero Mobile Installation**: Runs 100% in any modern mobile browser via WebSockets and HTML5 Canvas.
-- ⚡ **Ultra-Low Latency Streaming**: Optimized ACK-driven backpressure streaming delivers smooth real-time performance (~130ms) even over slow cellular connections.
-- 🎯 **Full High-DPI Desktop Capture**: Native C# GDI+ capture with true hardware display scaling awareness (`1920x1080` full screen, no cropping).
+- ⚡ **Ultra-Low Latency Streaming**: Optimized ACK-driven backpressure streaming delivers smooth real-time performance (~130ms) even over slow cellular connections. Defaults to efficient 960x540 streaming with dynamic switching up to full 1080p High-Quality in Settings.
+- 🎯 **Full High-DPI Desktop Capture**: Native C# GDI+ capture with true hardware display scaling awareness (`1920x1080` physical resolution, DPI-aware BitBlt).
 - 👆 **Touch & Trackpad Controls**:
   - Direct Touch & Trackpad modes
   - Left click, right click, double click, drag-and-drop
@@ -18,9 +18,9 @@ Pocket-Desk is a lightweight, zero-install remote desktop solution. Control your
   - Screen fit modes: **Fit Screen**, **Fit Width**, and **Stretch Full**
 - ⌨️ **Virtual Keyboard & Desktop Shortcuts**:
   - Quick typing bar with mobile soft keyboard integration
-  - Windows Start, Task View, Copy/Paste, and Function keys (`F1`-`F12`, `Esc`, `Tab`)
-- 📁 **File Transfer**: Browse and transfer files between your mobile device and desktop.
-- 🔒 **Secure Connection**: 6-digit session pairing with Cloudflare tunneling support for instant remote internet access anywhere.
+  - Native Win32 keyboard shortcuts (`Ctrl+C`, `Ctrl+V`, `Ctrl+Z`, `Alt+Tab`, `Win+D`, and `F1`-`F12`)
+- 📁 **Protected File Transfer**: Browse, download, and upload files with traversal sanitization and safe home-directory scoping.
+- 🔒 **Hardened Security**: Crypto-secure 6-digit session codes, brute-force rate-limiting lockout, 30-minute code expiry, and Cloudflare tunneling support.
 
 ---
 

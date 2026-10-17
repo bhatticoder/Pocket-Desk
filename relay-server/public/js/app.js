@@ -118,11 +118,14 @@ class App {
   }
 
   /**
-   * Check if connection code is in URL
+   * Check if connection code is in URL or localStorage
    */
   _checkUrlCode() {
     const params = new URLSearchParams(window.location.search);
-    const code = params.get('code');
+    let code = params.get('code');
+    if (!code) {
+      try { code = localStorage.getItem('pocketdesk_code'); } catch (e) {}
+    }
     
     if (code && code.length === 6 && /^\d{6}$/.test(code)) {
       const inputs = document.querySelectorAll('.code-digit');
@@ -150,6 +153,7 @@ class App {
     
     try {
       await this.connection.connectToDesktop(code);
+      try { localStorage.setItem('pocketdesk_code', code); } catch (e) {}
       this._showRemoteScreen();
     } catch (error) {
       this.connectionError.textContent = error.message;
@@ -848,34 +852,53 @@ class App {
         btn.classList.add('active');
         
         const quality = btn.dataset.quality;
-        const qualityMap = { low: 30, medium: 50, high: 80 };
+        const qualityMap = { low: 35, medium: 45, high: 52, '2k': 55 };
         
         if (this.connection) {
           this.connection.sendQualitySettings({
-            quality: qualityMap[quality],
+            quality: qualityMap[quality] || 52,
             type: quality
           });
         }
       });
     });
     
-    // FPS slider
+    // FPS slider and preset buttons (up to 60 FPS)
     const fpsSlider = document.getElementById('fpsSlider');
     const fpsValue = document.getElementById('fpsValue');
+    const fpsPresetBtns = document.querySelectorAll('.fps-preset-btn');
+    
+    const applyFps = (fps) => {
+      if (fpsSlider) fpsSlider.value = fps;
+      if (fpsValue) fpsValue.textContent = `${fps} FPS`;
+      fpsPresetBtns.forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.fps) === fps);
+      });
+      if (this.connection) {
+        this.connection.sendQualitySettings({ fps });
+      }
+    };
     
     if (fpsSlider) {
       fpsSlider.addEventListener('input', () => {
-        fpsValue.textContent = `${fpsSlider.value} FPS`;
+        const fps = parseInt(fpsSlider.value);
+        if (fpsValue) fpsValue.textContent = `${fps} FPS`;
+        fpsPresetBtns.forEach(b => {
+          b.classList.toggle('active', parseInt(b.dataset.fps) === fps);
+        });
       });
       
       fpsSlider.addEventListener('change', () => {
-        if (this.connection) {
-          this.connection.sendQualitySettings({
-            fps: parseInt(fpsSlider.value)
-          });
-        }
+        applyFps(parseInt(fpsSlider.value));
       });
     }
+
+    fpsPresetBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fps = parseInt(btn.dataset.fps);
+        applyFps(fps);
+      });
+    });
     
     // Touch mode
     document.querySelectorAll('[data-touchmode]').forEach(btn => {

@@ -452,7 +452,36 @@ body {
 .status-left, .status-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .status-bar {
+    padding: 0 6px;
+  }
+  .status-left, .status-right {
+    gap: 4px;
+  }
+  #statusText {
+    display: none; /* Hide text on small screens; green pulse dot remains */
+  }
+  .mode-badge {
+    font-size: 10px;
+    padding: 2px 5px;
+  }
+  .status-fps, .status-latency {
+    font-size: 10px;
+  }
+  .status-btn-kb {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+  .status-btn {
+    width: 26px;
+    height: 26px;
+  }
 }
 
 .status-indicator {
@@ -1331,6 +1360,12 @@ body {
   gap: 8px;
 }
 
+.setting-options.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
 .setting-option {
   flex: 1;
   height: 38px;
@@ -1343,12 +1378,21 @@ body {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .setting-option.active {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
   color: #fff;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.fps-preset-btn {
+  height: 32px;
+  font-size: 12px;
 }
 
 .setting-slider {

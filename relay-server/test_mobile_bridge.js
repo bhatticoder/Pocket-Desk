@@ -4,8 +4,8 @@ const path = require('path');
 const fs = require('fs');
 const WebSocket = require('ws');
 
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const TARGET_URL = 'https://visible-intermediate-taxi-compiled.trycloudflare.com/connect?code=746781';
+const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const TARGET_URL = process.argv[2] || process.env.TARGET_URL || 'http://localhost:3000/connect';
 const SCREENSHOT_PATH = path.join(__dirname, 'mobile_test_result.png');
 
 async function sleep(ms) {

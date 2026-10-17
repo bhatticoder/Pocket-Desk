@@ -55,6 +55,14 @@ public class NativeInputServer
     [DllImport("user32.dll")]
     public static extern int GetSystemMetrics(int nIndex);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern uint SetThreadExecutionState(uint esFlags);
+
+    public const uint ES_CONTINUOUS = 0x80000000;
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+    public const uint ES_AWAYMODE_REQUIRED = 0x00000040;
+
     static void EnsureDesktop()
     {
         IntPtr hInput = OpenInputDesktop(0, false, 0x01FF);
@@ -68,6 +76,22 @@ public class NativeInputServer
     {
         try { SetProcessDPIAware(); } catch { }
         Console.OutputEncoding = Encoding.UTF8;
+
+        // Continuous host anti-sleep thread
+        Thread awakeThread = new Thread(() =>
+        {
+            while (true)
+            {
+                try
+                {
+                    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED | ES_AWAYMODE_REQUIRED);
+                }
+                catch { }
+                Thread.Sleep(20000);
+            }
+        });
+        awakeThread.IsBackground = true;
+        awakeThread.Start();
         
         Thread worker = new Thread(() =>
         {

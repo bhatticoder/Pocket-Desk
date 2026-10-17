@@ -73,49 +73,41 @@ npm install
 ```
 
 > [!NOTE]  
-> The `@nut-tree-fork/nut-js` package (for mouse/keyboard control) may require additional setup on some systems. If it fails, the agent will still work for **screen viewing** — just without input control.
+> Pocket-Desk uses bundled native C# helper executables (`FastCaptureServer.exe` and `NativeInputServer.exe`) for high-speed hardware screen capture and input injection. If run in non-native mode, it automatically falls back to Node.js libraries.
 
 ---
 
-## 🖥️ Running Locally (for testing)
+## 🚀 Running Pocket-Desk
 
-### Step 1: Start the Relay Server
+### Option 1: One-Command Internet Start (Recommended)
+Automatically starts Relay Server, Cloudflare Tunnel, and Desktop Agent:
 ```powershell
-cd "d:\Projects\Mobile-Laptop Bridge\relay-server"
+node start-internet.js
+```
+The console will display:
+- Direct connect URL (with code embedded)
+- Scannable terminal QR code
+- 6-digit connection code
+
+Open the printed URL or scan the QR code from your phone's browser!
+
+### Option 2: Running Locally (Local Wi-Fi)
+
+#### Step 1: Start Relay Server
+```powershell
+cd relay-server
 node index.js
 ```
-You'll see:
-```
-╔══════════════════════════════════════════════════════════╗
-║         Mobile-Laptop Bridge  •  Relay Server           ║
-║  🌐  Server running on port 3000                        ║
-╚══════════════════════════════════════════════════════════╝
-```
 
-### Step 2: Start the Desktop Agent
-Open a **new terminal** and run:
+#### Step 2: Start Desktop Agent
+Open a second terminal:
 ```powershell
-cd "d:\Projects\Mobile-Laptop Bridge\desktop-agent"
+cd desktop-agent
 node index.js
 ```
-You'll see a **6-digit connection code** like:
-```
-╔══════════════════════════════════════════════╗
-║   🖥️  Desktop Agent Ready                   ║
-║   Connection Code:  482 159                  ║
-║   Enter this code on your mobile device      ║
-╚══════════════════════════════════════════════╝
-```
 
-### Step 3: Connect from Mobile
-On your phone, open `http://<your-laptop-IP>:3000` in the browser.  
-To find your IP:
-```powershell
-ipconfig
-```
-Look for your Wi-Fi adapter's IPv4 address (e.g., `192.168.1.x`).
-
-Enter the **6-digit code** and tap **Connect**!
+#### Step 3: Connect from Mobile
+On your phone, open `http://<your-laptop-IP>:3000` (e.g. from `ipconfig`), enter the 6-digit code, and tap **Connect**!
 
 ---
 

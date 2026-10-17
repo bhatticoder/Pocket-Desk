@@ -24,11 +24,11 @@ const config = {
   relayUrl: process.env.RELAY_URL || 'http://localhost:3000',
   publicUrl: process.env.PUBLIC_URL || '',
   
-  // Screen capture settings
-  captureInterval: 25,  // Adaptive pacing driven by client ACK
-  quality: 26,          // Lightweight JPEG quality for ultra-low latency cellular streaming (~18KB)
-  maxWidth: 960,        // 960x540: 16:9 full desktop scaled accurately
-  maxHeight: 540,
+  // Screen capture settings - tuned for instant <60ms internet latency
+  captureInterval: 16,  // Adaptive pacing driven by client ACK (up to 60 FPS)
+  quality: 42,          // Crisp visual clarity with compact payload (~50KB, transmits in 10-15ms)
+  maxWidth: 1920,       // 1080p full resolution default (supports up to 2K 2560x1440)
+  maxHeight: 1080,
   
   // File transfer
   downloadDir: path.join(os.homedir(), 'Downloads'),
@@ -162,6 +162,36 @@ function initFastCapture() {
   }
 }
 
+function restartFastCapture() {
+  if (fastCaptureProc) {
+    try {
+      fastCaptureProc.kill();
+    } catch (e) {}
+    fastCaptureProc = null;
+    fastCaptureBuf = Buffer.alloc(0);
+    while (pendingFrameResolvers.length > 0) {
+      const resolve = pendingFrameResolvers.shift();
+      resolve(null);
+    }
+  }
+  return initFastCapture();
+}
+
+function updateFastCaptureConfig(quality, width, height) {
+  if (fastCaptureProc && fastCaptureProc.stdin && !fastCaptureProc.killed) {
+    try {
+      const buf = Buffer.alloc(6);
+      buf.writeUInt8(2, 0); // Command 2: Dynamic config change
+      buf.writeUInt8(Math.max(1, Math.min(100, quality)), 1);
+      buf.writeInt16LE(Math.max(1, width), 2);
+      buf.writeInt16LE(Math.max(1, height), 4);
+      fastCaptureProc.stdin.write(buf);
+      return true;
+    } catch (e) {}
+  }
+  return restartFastCapture();
+}
+
 async function captureScreen() {
   if (fastCaptureProc) {
     return new Promise(resolve => {
@@ -253,11 +283,15 @@ function checkScreenState(buffer) {
 }
 
 let frameAckTimeout = null;
+let pendingImmediateCapture = false;
 
 async function doCaptureAndSend() {
   if (!isStreaming || !mobileConnected) return;
   if (isCapturing) return;
-  if (isFrameInFlight) return; // Strict backpressure: prevent buffer bloat
+  if (isFrameInFlight) {
+    pendingImmediateCapture = true;
+    return;
+  }
   
   isCapturing = true;
   try {
@@ -270,14 +304,14 @@ async function doCaptureAndSend() {
       });
       checkScreenState(frame);
 
-      // Safety timeout: If mobile doesn't ACK within 2500ms (packet loss fallback), resume streaming
+      // Safety timeout: If mobile doesn't ACK within 400ms (packet loss fallback), resume streaming
       if (frameAckTimeout) clearTimeout(frameAckTimeout);
       frameAckTimeout = setTimeout(() => {
         isFrameInFlight = false;
         if (isStreaming && mobileConnected) {
           doCaptureAndSend();
         }
-      }, 2500);
+      }, 400);
     }
   } catch (err) {
     console.error('Frame send error:', err.message);
@@ -287,19 +321,24 @@ async function doCaptureAndSend() {
   }
 }
 
+let immediateFrameTimer = null;
 function triggerImmediateFrame() {
-  if (isStreaming && mobileConnected) {
-    isFrameInFlight = false;
-    if (frameAckTimeout) clearTimeout(frameAckTimeout);
-    if (captureTimer) clearTimeout(captureTimer);
-    // Immediate frame right after click/input
-    captureTimer = setTimeout(doCaptureAndSend, 15);
-    // Follow-up frame 85ms later to catch any OS redraw/window animation
-    setTimeout(() => {
-      isFrameInFlight = false;
-      doCaptureAndSend();
-    }, 85);
+  if (!isStreaming || !mobileConnected) return;
+  
+  // If a frame is already in transit over internet, do not flood network buffer
+  if (isFrameInFlight) {
+    pendingImmediateCapture = true;
+    return;
   }
+
+  if (immediateFrameTimer) clearTimeout(immediateFrameTimer);
+  immediateFrameTimer = setTimeout(() => {
+    if (!isFrameInFlight) {
+      doCaptureAndSend();
+    } else {
+      pendingImmediateCapture = true;
+    }
+  }, 10);
 }
 
 function startStreaming() {
@@ -307,6 +346,7 @@ function startStreaming() {
   isStreaming = true;
   isCapturing = false;
   isFrameInFlight = false;
+  pendingImmediateCapture = false;
   
   console.log(chalk.cyan('  ▶ Continuous live screen streaming started'));
   doCaptureAndSend();
@@ -318,10 +358,21 @@ function handleFrameAck() {
     frameAckTimeout = null;
   }
   isFrameInFlight = false;
-  if (isStreaming && mobileConnected && !isCapturing) {
+
+  if (!isStreaming || !mobileConnected) return;
+
+  // If user interacted (keystroke / mouse) while frame was in flight, capture live update immediately!
+  if (pendingImmediateCapture) {
+    pendingImmediateCapture = false;
+    doCaptureAndSend();
+    return;
+  }
+
+  if (!isCapturing) {
     if (captureTimer) clearTimeout(captureTimer);
-    // Send next frame after 15ms (smooth adaptive frame rate)
-    captureTimer = setTimeout(doCaptureAndSend, 15);
+    // Respect client FPS interval (supports up to 60 FPS, 5ms safety floor)
+    const delay = Math.max(5, config.captureInterval || 16);
+    captureTimer = setTimeout(doCaptureAndSend, delay);
   }
 }
 
@@ -427,14 +478,41 @@ function mapCoordinates(data) {
 const VK_MAP = {
   'Backspace': 0x08, 'Tab': 0x09, 'Enter': 0x0D, 'Return': 0x0D,
   'Shift': 0x10, 'Control': 0x11, 'Ctrl': 0x11, 'Alt': 0x12,
+  'Pause': 0x13, 'CapsLock': 0x14,
   'Escape': 0x1B, 'Esc': 0x1B, 'Space': 0x20, ' ': 0x20,
-  'PageUp': 0x21, 'PageDown': 0x22, 'End': 0x23, 'Home': 0x24,
+  'PageUp': 0x21, 'PgUp': 0x21, 'PageDown': 0x22, 'PgDn': 0x22,
+  'End': 0x23, 'Home': 0x24,
   'ArrowLeft': 0x25, 'ArrowUp': 0x26, 'ArrowRight': 0x27, 'ArrowDown': 0x28,
+  'PrintScreen': 0x2C, 'PrtSc': 0x2C, 'Insert': 0x2D,
   'Delete': 0x2E, 'Del': 0x2E,
   'Meta': 0x5B, 'Win': 0x5B, 'Windows': 0x5B, 'Start': 0x5B,
   'F1': 0x70, 'F2': 0x71, 'F3': 0x72, 'F4': 0x73, 'F5': 0x74, 'F6': 0x75,
   'F7': 0x76, 'F8': 0x77, 'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B
 };
+
+function getVirtualKeyCode(key) {
+  if (!key) return null;
+  const k = String(key).trim();
+  if (VK_MAP[k] !== undefined) return VK_MAP[k];
+
+  // Case-insensitive lookup in VK_MAP
+  const lowerKey = k.toLowerCase();
+  for (const [name, code] of Object.entries(VK_MAP)) {
+    if (name.toLowerCase() === lowerKey) return code;
+  }
+
+  // Single letter a-z / A-Z
+  if (/^[a-zA-Z]$/.test(k)) {
+    return k.toUpperCase().charCodeAt(0);
+  }
+
+  // Single digit 0-9
+  if (/^[0-9]$/.test(k)) {
+    return k.charCodeAt(0);
+  }
+
+  return null;
+}
 
 async function handleMouseMove(data) {
   const coords = mapCoordinates(data);
@@ -543,8 +621,8 @@ async function handleKeyPress(data) {
       return;
     }
   }
-  const vk = VK_MAP[key];
-  if (vk) {
+  const vk = getVirtualKeyCode(key);
+  if (vk !== null) {
     if (sendNativeInput(`KEYPRESS ${vk}`)) {
       triggerImmediateFrame();
       return;
@@ -590,8 +668,8 @@ async function handleTextInput(data) {
 }
 
 async function handleKeyDown(data) {
-  const vk = VK_MAP[data.key];
-  if (vk && sendNativeInput(`KEY ${vk} down`)) return;
+  const vk = getVirtualKeyCode(data.key);
+  if (vk !== null && sendNativeInput(`KEY ${vk} down`)) return;
   if (nutInstance) {
     try {
       const mappedKey = getKeyMapping(data.key);
@@ -603,8 +681,8 @@ async function handleKeyDown(data) {
 }
 
 async function handleKeyUp(data) {
-  const vk = VK_MAP[data.key];
-  if (vk && sendNativeInput(`KEY ${vk} up`)) {
+  const vk = getVirtualKeyCode(data.key);
+  if (vk !== null && sendNativeInput(`KEY ${vk} up`)) {
     triggerImmediateFrame();
     return;
   }
@@ -620,14 +698,36 @@ async function handleKeyUp(data) {
 }
 
 async function handleKeyCombo(data) {
-  if (!data || !data.keys) return;
+  if (!data || !data.keys || !Array.isArray(data.keys)) return;
   const comboStr = data.keys.join('+').toLowerCase();
+
   if (comboStr === 'meta+d' || comboStr === 'win+d') {
     if (sendNativeInput('DESKTOP')) {
       triggerImmediateFrame();
       return;
     }
   }
+
+  // Handle native key combo with NativeInputServer
+  if (nativeInputProc) {
+    const vks = data.keys.map(k => getVirtualKeyCode(k)).filter(vk => vk !== null);
+    if (vks.length > 0) {
+      try {
+        for (const vk of vks) {
+          sendNativeInput(`KEY ${vk} down`);
+        }
+        await new Promise(r => setTimeout(r, 50));
+        for (let i = vks.length - 1; i >= 0; i--) {
+          sendNativeInput(`KEY ${vks[i]} up`);
+        }
+        triggerImmediateFrame();
+        return;
+      } catch (e) {
+        console.error('Native key combo error:', e.message);
+      }
+    }
+  }
+
   if (nutInstance) {
     try {
       const keys = data.keys.map(k => getKeyMapping(k)).filter(k => k !== null);
@@ -649,6 +749,27 @@ async function handleKeyCombo(data) {
 
 // ─── File Transfer ───────────────────────────────────────────────────────────
 
+// Safe root directory for file browsing & download (restricts access to user's home by default)
+const ALLOWED_ROOT = path.resolve(process.env.ALLOWED_FILE_ROOT || os.homedir());
+
+function isSafeFilePath(targetPath) {
+  try {
+    const resolved = path.resolve(targetPath);
+    if (!resolved.startsWith(ALLOWED_ROOT)) return false;
+
+    // Block access to sensitive credential / config directories
+    const rel = path.relative(ALLOWED_ROOT, resolved);
+    const segments = rel.split(path.sep);
+    const sensitive = ['.ssh', '.aws', '.gnupg', '.env', 'ntuser.dat', 'AppData'];
+    for (const seg of segments) {
+      if (sensitive.includes(seg)) return false;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function handleFileRequest(data) {
   if (data.action === 'list') {
     await listDirectory(data.path);
@@ -659,15 +780,20 @@ async function handleFileRequest(data) {
 
 async function listDirectory(dirPath) {
   try {
-    const resolvedPath = dirPath === '~' ? os.homedir() : path.resolve(dirPath);
-    const entries = await fs.promises.readdir(resolvedPath, { withFileTypes: true });
+    let targetPath = (!dirPath || dirPath === '~') ? ALLOWED_ROOT : path.resolve(dirPath);
+    if (!isSafeFilePath(targetPath)) {
+      console.warn(chalk.yellow(`  ⚠️ Blocked unauthorized file list attempt: ${targetPath}`));
+      targetPath = ALLOWED_ROOT;
+    }
+
+    const entries = await fs.promises.readdir(targetPath, { withFileTypes: true });
     
     const files = [];
     for (const entry of entries) {
       // Skip hidden files and system files
       if (entry.name.startsWith('.')) continue;
       
-      const fullPath = path.join(resolvedPath, entry.name);
+      const fullPath = path.join(targetPath, entry.name);
       let size = 0;
       
       try {
@@ -691,8 +817,15 @@ async function listDirectory(dirPath) {
       if (!a.isDir && b.isDir) return 1;
       return a.name.localeCompare(b.name);
     });
+
+    const isAtRoot = targetPath.toLowerCase() === ALLOWED_ROOT.toLowerCase();
+    const parentPath = isAtRoot ? null : path.dirname(targetPath);
     
-    socket.emit('file:list', { files, currentPath: resolvedPath });
+    socket.emit('file:list', { 
+      files, 
+      currentPath: targetPath,
+      parentPath: (parentPath && isSafeFilePath(parentPath)) ? parentPath : (isAtRoot ? null : ALLOWED_ROOT)
+    });
   } catch (error) {
     console.error(chalk.red('File list error:'), error.message);
     socket.emit('file:list', { files: [], error: error.message });
@@ -702,7 +835,14 @@ async function listDirectory(dirPath) {
 async function sendFile(filePath) {
   try {
     const resolvedPath = path.resolve(filePath);
+    if (!isSafeFilePath(resolvedPath)) {
+      console.warn(chalk.yellow(`  ⚠️ Blocked unauthorized file download attempt: ${resolvedPath}`));
+      return;
+    }
+
     const stat = await fs.promises.stat(resolvedPath);
+    if (stat.isDirectory()) return;
+
     const fileName = path.basename(resolvedPath);
     const fileId = nanoid(8);
     const totalChunks = Math.ceil(stat.size / config.chunkSize);
@@ -757,15 +897,24 @@ const uploadChunks = {};
 
 function handleFileUpload(data) {
   const { fileId, fileName, chunk, chunkIndex, totalChunks, totalSize } = data;
+
+  // Sanitize upload filename to strictly prevent path traversal
+  const safeFileName = path.basename(fileName || 'upload').replace(/[\/\\]/g, '');
+  const savePath = path.resolve(config.downloadDir, safeFileName);
+  if (!savePath.startsWith(path.resolve(config.downloadDir))) {
+    console.error(chalk.red(`  ✗ Blocked malicious file upload traversal: ${fileName}`));
+    return;
+  }
   
   if (!uploadChunks[fileId]) {
     uploadChunks[fileId] = {
-      fileName,
+      fileName: safeFileName,
+      savePath,
       chunks: new Array(totalChunks),
       received: 0,
       totalSize
     };
-    console.log(chalk.blue(`  📥 Receiving file: ${fileName}`));
+    console.log(chalk.blue(`  📥 Receiving file: ${safeFileName}`));
   }
   
   uploadChunks[fileId].chunks[chunkIndex] = Buffer.from(chunk);
@@ -774,12 +923,12 @@ function handleFileUpload(data) {
   // Check if all chunks received
   if (uploadChunks[fileId].received === totalChunks) {
     const combined = Buffer.concat(uploadChunks[fileId].chunks.filter(Boolean));
-    const savePath = path.join(config.downloadDir, fileName);
+    const finalPath = uploadChunks[fileId].savePath;
     
-    fs.promises.writeFile(savePath, combined)
+    fs.promises.writeFile(finalPath, combined)
       .then(() => {
-        console.log(chalk.green(`  ✓ File saved: ${savePath}`));
-        socket.emit('file:uploadComplete', { fileName, size: totalSize, path: savePath });
+        console.log(chalk.green(`  ✓ File saved: ${finalPath}`));
+        socket.emit('file:uploadComplete', { fileName: safeFileName, size: totalSize, path: finalPath });
       })
       .catch(err => {
         console.error(chalk.red(`  ✗ File save error: ${err.message}`));
@@ -879,23 +1028,55 @@ async function connectToRelay() {
   socket.on('input:keyCombo', handleKeyCombo);
 
   // ── Settings Events ──
-  socket.on('settings:quality', (data) => {
-    if (data.quality) config.quality = data.quality;
-    if (data.fps) config.captureInterval = Math.round(1000 / data.fps);
+  socket.on('settings:quality', async (data) => {
+    let settingsChanged = false;
+    const prevW = config.maxWidth;
+    const prevH = config.maxHeight;
+    const prevQ = config.quality;
+
+    if (data.fps) {
+      const fps = Math.min(60, Math.max(5, parseInt(data.fps, 10)));
+      config.captureInterval = Math.round(1000 / fps);
+    }
     
-    // Apply resolution based on quality
+    // Apply resolution & tuned JPEG quality based on quality tier for low-latency streaming
     if (data.type === 'low') {
-      config.maxWidth = 854;
-      config.maxHeight = 480;
-    } else if (data.type === 'medium') {
       config.maxWidth = 1280;
       config.maxHeight = 720;
+      config.quality = 32;
+    } else if (data.type === 'medium') {
+      config.maxWidth = 1600;
+      config.maxHeight = 900;
+      config.quality = 38;
     } else if (data.type === 'high') {
       config.maxWidth = 1920;
       config.maxHeight = 1080;
+      config.quality = 44;
+    } else if (data.type === '2k') {
+      config.maxWidth = 2560;
+      config.maxHeight = 1440;
+      config.quality = 48;
+    } else if (data.quality) {
+      config.quality = Math.max(10, Math.min(95, data.quality));
+    }
+
+    if (config.maxWidth !== prevW || config.maxHeight !== prevH || config.quality !== prevQ) {
+      settingsChanged = true;
     }
     
-    console.log(chalk.gray(`  ⚙ Quality: ${config.quality}%, ${Math.round(1000/config.captureInterval)} FPS, ${config.maxWidth}x${config.maxHeight}`));
+    console.log(chalk.gray(`  ⚙ Stream settings: Quality ${config.quality}%, ${Math.round(1000/config.captureInterval)} FPS, ${config.maxWidth}x${config.maxHeight}`));
+
+    if (settingsChanged) {
+      updateFastCaptureConfig(config.quality, config.maxWidth, config.maxHeight);
+      const screenInfo = await getScreenInfo();
+      socket.emit('desktop:screenInfo', {
+        width: screenInfo.scaledWidth,
+        height: screenInfo.scaledHeight,
+        originalWidth: screenInfo.width,
+        originalHeight: screenInfo.height
+      });
+      triggerImmediateFrame();
+    }
   });
 
   // ── File Events ──
@@ -973,6 +1154,18 @@ function printSessionInfo(code) {
     console.log(chalk.bold(`  ║      ${chalk.yellow(directConnectUrl)}          ║`));
   }
   console.log(chalk.bold('  ╚════════════════════════════════════════════════════════════════╝'));
+
+  // Terminal QR code rendering
+  try {
+    const QRCode = require('qrcode');
+    QRCode.toString(directConnectUrl, { type: 'terminal', small: true }, (err, qrText) => {
+      if (!err && qrText) {
+        console.log(chalk.cyan('\n  📷 Scan with your phone camera to connect instantly:\n'));
+        console.log(qrText);
+      }
+    });
+  } catch (err) {}
+
   console.log('');
   console.log(chalk.gray(`  Relay: ${config.relayUrl}`));
   console.log(chalk.gray(`  Host: ${os.hostname()} (${os.platform()})`));

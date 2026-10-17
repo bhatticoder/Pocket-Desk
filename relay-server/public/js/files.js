@@ -37,12 +37,30 @@ class FileManager {
         this.connection.requestFileList('~');
       });
     }
+
+    // Event delegation on fileList (avoids inline onclick string escaping bugs)
+    if (this.fileList) {
+      this.fileList.addEventListener('click', (e) => {
+        const actionBtn = e.target.closest('[data-file-action]');
+        if (!actionBtn) return;
+        const action = actionBtn.dataset.fileAction;
+        const encodedPath = actionBtn.dataset.filePath;
+        const filePath = encodedPath ? decodeURIComponent(encodedPath) : '';
+        if (action === 'browse') {
+          this._browseFolder(filePath);
+        } else if (action === 'download') {
+          this._downloadFile(filePath);
+        }
+      });
+    }
   }
 
   _setupConnectionHandlers() {
     // File list from desktop
     this.connection.onFileList = (data) => {
-      this._renderFileList(data.files || []);
+      this.currentPath = data.currentPath || '~';
+      this.parentPath = data.parentPath || null;
+      this._renderFileList(data.files || [], this.currentPath, this.parentPath);
     };
 
     // File download chunks
@@ -133,31 +151,55 @@ class FileManager {
   /**
    * Render file list from desktop
    */
-  _renderFileList(files) {
+  _renderFileList(files, currentPath, parentPath) {
     if (!this.fileList) return;
     
-    if (files.length === 0) {
-      this.fileList.innerHTML = `
-        <div class="file-list-empty">
-          <p>No files found</p>
+    let html = '';
+
+    // Folder navigation bar with current directory and Up button
+    if (currentPath) {
+      html += `
+        <div class="file-path-header" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:8px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:78%;" title="${this._escapeHtml(currentPath)}">
+            📁 <strong style="color:var(--text-primary);">${this._escapeHtml(currentPath)}</strong>
+          </div>
+          ${parentPath ? `
+            <button class="file-up-btn" data-file-action="browse" data-file-path="${encodeURIComponent(parentPath)}" style="background:var(--accent-gradient);color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">
+              ⬆️ Up
+            </button>
+          ` : ''}
         </div>
       `;
+    }
+
+    if (!files || files.length === 0) {
+      html += `
+        <div class="file-list-empty">
+          <p>No files found in this folder</p>
+        </div>
+      `;
+      this.fileList.innerHTML = html;
       return;
     }
 
-    this.fileList.innerHTML = files.map(file => `
-      <div class="file-item" data-path="${this._escapeHtml(file.path)}">
-        <div class="file-item-icon">${file.isDir ? '📁' : this._getFileIcon(file.name)}</div>
-        <div class="file-item-info">
-          <div class="file-item-name">${this._escapeHtml(file.name)}</div>
-          <div class="file-item-size">${file.isDir ? 'Folder' : this._formatSize(file.size)}</div>
+    html += files.map(file => {
+      const encodedPath = encodeURIComponent(file.path);
+      return `
+        <div class="file-item" data-path="${this._escapeHtml(file.path)}">
+          <div class="file-item-icon">${file.isDir ? '📁' : this._getFileIcon(file.name)}</div>
+          <div class="file-item-info">
+            <div class="file-item-name">${this._escapeHtml(file.name)}</div>
+            <div class="file-item-size">${file.isDir ? 'Folder' : this._formatSize(file.size)}</div>
+          </div>
+          ${file.isDir 
+            ? `<button class="file-item-action" data-file-action="browse" data-file-path="${encodedPath}" title="Open Folder">→</button>`
+            : `<button class="file-item-action" data-file-action="download" data-file-path="${encodedPath}" title="Download File">↓</button>`
+          }
         </div>
-        ${file.isDir 
-          ? `<button class="file-item-action" onclick="app.fileManager._browseFolder('${this._escapeHtml(file.path)}')">→</button>`
-          : `<button class="file-item-action" onclick="app.fileManager._downloadFile('${this._escapeHtml(file.path)}')">↓</button>`
-        }
-      </div>
-    `).join('');
+      `;
+    }).join('');
+
+    this.fileList.innerHTML = html;
   }
 
   _browseFolder(path) {

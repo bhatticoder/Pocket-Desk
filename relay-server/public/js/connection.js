@@ -44,9 +44,10 @@ class ConnectionManager {
 
     this.socket.on('connect', () => {
       console.log('[Connection] Connected to relay server');
-      if (this.sessionCode && this.reconnecting) {
-        console.log('[Connection] Restoring session with code:', this.sessionCode);
-        this.connectToDesktop(this.sessionCode).then(() => {
+      const savedCode = this.sessionCode || (typeof localStorage !== 'undefined' ? localStorage.getItem('pocketdesk_code') : null);
+      if (savedCode && !this.connected) {
+        console.log('[Connection] Auto-restoring desktop session with code:', savedCode);
+        this.connectToDesktop(savedCode).then(() => {
           this.reconnecting = false;
           if (this.onReconnected) this.onReconnected();
         }).catch(err => {

@@ -31,6 +31,12 @@ public class FastCaptureServer
     [DllImport("gdi32.dll", SetLastError = true)]
     public static extern bool BitBlt(IntPtr hdcDest, int nXDest, int nYDest, int nWidth, int nHeight, IntPtr hdcSrc, int nXSrc, int nYSrc, int dwRop);
 
+    [DllImport("gdi32.dll", SetLastError = true)]
+    public static extern bool StretchBlt(IntPtr hdcDest, int nXOriginDest, int nYOriginDest, int nWidthDest, int nHeightDest, IntPtr hdcSrc, int nXOriginSrc, int nYOriginSrc, int nWidthSrc, int nHeightSrc, int dwRop);
+
+    [DllImport("gdi32.dll")]
+    public static extern int SetStretchBltMode(IntPtr hdc, int iStretchMode);
+
     [DllImport("gdi32.dll")]
     public static extern bool DeleteDC(IntPtr hdc);
 
@@ -48,17 +54,18 @@ public class FastCaptureServer
     public const int DESKTOPHORZRES = 118;
     public const int DESKTOPVERTRES = 117;
     public const int SRCCOPY = 0x00CC0020;
+    public const int HALFTONE = 4;
 
     public static void Main(string[] args)
     {
         try { SetProcessDPIAware(); } catch { }
 
-        int quality = 55;
+        int quality = 42;
         if (args.Length > 0) int.TryParse(args[0], out quality);
-        if (quality <= 0 || quality > 100) quality = 55;
+        if (quality <= 0 || quality > 100) quality = 42;
 
-        int targetWidth = 1280;
-        int targetHeight = 720;
+        int targetWidth = 1920;
+        int targetHeight = 1080;
         if (args.Length > 1) int.TryParse(args[1], out targetWidth);
         if (args.Length > 2) int.TryParse(args[2], out targetHeight);
 
@@ -85,7 +92,7 @@ public class FastCaptureServer
 
             Stream inStream = Console.OpenStandardInput();
             Stream outStream = Console.OpenStandardOutput();
-            MemoryStream ms = new MemoryStream(256 * 1024);
+            MemoryStream ms = new MemoryStream(512 * 1024);
 
             byte[] cmdBuf = new byte[1];
 
@@ -94,7 +101,34 @@ public class FastCaptureServer
                 int r = inStream.Read(cmdBuf, 0, 1);
                 if (r <= 0) break;
 
-                // Re-bind to active input desktop if it changed
+                // Command 2: Dynamic config change (quality & resolution)
+                if (cmdBuf[0] == 2)
+                {
+                    int newQ = inStream.ReadByte();
+                    byte[] dimBuf = new byte[4];
+                    int rdDim = 0;
+                    while (rdDim < 4)
+                    {
+                        int n = inStream.Read(dimBuf, rdDim, 4 - rdDim);
+                        if (n <= 0) break;
+                        rdDim += n;
+                    }
+                    if (rdDim == 4)
+                    {
+                        if (newQ > 0 && newQ <= 100)
+                        {
+                            quality = newQ;
+                            encParams.Param[0] = new EncoderParameter(Encoder.Quality, (long)quality);
+                        }
+                        int nw = BitConverter.ToInt16(dimBuf, 0);
+                        int nh = BitConverter.ToInt16(dimBuf, 2);
+                        if (nw > 0) targetWidth = nw;
+                        if (nh > 0) targetHeight = nh;
+                    }
+                    continue;
+                }
+
+                // Command 1: Capture and encode screen frame
                 IntPtr curInput = OpenInputDesktop(0, false, 0x01FF);
                 if (curInput != IntPtr.Zero)
                 {
@@ -107,36 +141,35 @@ public class FastCaptureServer
                 if (w <= 0) w = 1920;
                 if (h <= 0) h = 1080;
 
+                // Determine capture size
+                int outW = w;
+                int outH = h;
+                bool needsScale = (w > targetWidth || h > targetHeight);
+                if (needsScale)
+                {
+                    float scale = Math.Min((float)targetWidth / w, (float)targetHeight / h);
+                    outW = Math.Max(1, (int)(w * scale));
+                    outH = Math.Max(1, (int)(h * scale));
+                }
+
                 IntPtr hdcMem = CreateCompatibleDC(hdcScreen);
-                IntPtr hBmp = CreateCompatibleBitmap(hdcScreen, w, h);
+                IntPtr hBmp = CreateCompatibleBitmap(hdcScreen, outW, outH);
                 IntPtr hOld = SelectObject(hdcMem, hBmp);
 
-                BitBlt(hdcMem, 0, 0, w, h, hdcScreen, 0, 0, SRCCOPY);
+                if (needsScale)
+                {
+                    SetStretchBltMode(hdcMem, HALFTONE);
+                    StretchBlt(hdcMem, 0, 0, outW, outH, hdcScreen, 0, 0, w, h, SRCCOPY);
+                }
+                else
+                {
+                    BitBlt(hdcMem, 0, 0, w, h, hdcScreen, 0, 0, SRCCOPY);
+                }
 
+                ms.SetLength(0);
                 using (Bitmap srcBmp = Image.FromHbitmap(hBmp))
                 {
-                    ms.SetLength(0);
-
-                    // Resize if larger than target
-                    if (w > targetWidth || h > targetHeight)
-                    {
-                        float scale = Math.Min((float)targetWidth / w, (float)targetHeight / h);
-                        int scaledW = (int)(w * scale);
-                        int scaledH = (int)(h * scale);
-                        using (Bitmap resized = new Bitmap(scaledW, scaledH))
-                        {
-                            using (Graphics g = Graphics.FromImage(resized))
-                            {
-                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Bilinear;
-                                g.DrawImage(srcBmp, 0, 0, scaledW, scaledH);
-                            }
-                            resized.Save(ms, jpgEncoder, encParams);
-                        }
-                    }
-                    else
-                    {
-                        srcBmp.Save(ms, jpgEncoder, encParams);
-                    }
+                    srcBmp.Save(ms, jpgEncoder, encParams);
                 }
 
                 SelectObject(hdcMem, hOld);

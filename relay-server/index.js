@@ -15,6 +15,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { nanoid } = require('nanoid');
 const QRCode = require('qrcode');
 
@@ -39,17 +40,29 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 
-// ─── Session Store ───────────────────────────────────────────────────────────
+// ─── Session Store & Security Config ─────────────────────────────────────────
 // Each session represents a desktop agent waiting for a mobile connection
 const sessions = new Map();
 
+// Rate limiting on mobile connection attempts: IP -> { count, lockedUntil }
+const connectAttempts = new Map();
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 60 * 1000; // 1 minute lockout
+const CODE_LIFETIME_MS = 30 * 60 * 1000; // Unused codes expire after 30 minutes
+
+function getClientIp(socket) {
+  const forwarded = socket.handshake.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return socket.handshake.address || socket.id;
+}
+
 /**
- * Generate a 6-digit numeric connection code
+ * Generate a cryptographically secure 6-digit numeric connection code
  */
 function generateCode() {
   let code;
   do {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
+    code = crypto.randomInt(100000, 1000000).toString();
   } while (sessions.has(code)); // ensure uniqueness
   return code;
 }
@@ -133,18 +146,53 @@ io.on('connection', (socket) => {
 
   // ── Mobile Client Connection ──
   socket.on('mobile:connect', (data, callback) => {
+    const clientIp = getClientIp(socket);
+    const now = Date.now();
+    const attempts = connectAttempts.get(clientIp);
+
+    // Check rate limit lockout
+    if (attempts && attempts.lockedUntil && now < attempts.lockedUntil) {
+      const waitSec = Math.ceil((attempts.lockedUntil - now) / 1000);
+      if (callback) {
+        callback({ 
+          success: false, 
+          error: `Too many failed attempts. Please wait ${waitSec}s.` 
+        });
+      }
+      return;
+    }
+
     const { code } = data;
     const session = sessions.get(code);
 
     if (!session) {
-      if (callback) callback({ success: false, error: 'Invalid connection code' });
+      // Record failed attempt
+      const count = (attempts && attempts.lockedUntil && now >= attempts.lockedUntil ? 0 : (attempts?.count || 0)) + 1;
+      const lockedUntil = count >= MAX_FAILED_ATTEMPTS ? now + LOCKOUT_DURATION_MS : 0;
+      connectAttempts.set(clientIp, { count, lockedUntil });
+
+      console.warn(`[Security] Failed mobile connect attempt for code "${code}" from ${clientIp} (${count}/${MAX_FAILED_ATTEMPTS})`);
+      if (callback) {
+        callback({ 
+          success: false, 
+          error: lockedUntil > 0 
+            ? 'Too many failed attempts. Rate limited for 1 minute.' 
+            : 'Invalid connection code' 
+        });
+      }
       return;
     }
 
-    if (session.mobileSocketId) {
-      if (callback) callback({ success: false, error: 'Session already has a mobile client' });
-      return;
+    // Seamless reconnection: If previous mobile socket was disconnected or stale, replace it
+    if (session.mobileSocketId && session.mobileSocketId !== socket.id) {
+      const oldMobile = io.sockets.sockets.get(session.mobileSocketId);
+      if (oldMobile) {
+        try { oldMobile.disconnect(true); } catch (e) {}
+      }
     }
+
+    // Reset rate limiter upon successful authentication
+    connectAttempts.delete(clientIp);
 
     session.mobileSocketId = socket.id;
     session.lastActivity = Date.now();
@@ -159,7 +207,7 @@ io.on('connection', (socket) => {
       timestamp: Date.now()
     });
 
-    console.log(`[Mobile] Connected to session ${session.id}`);
+    console.log(`[Mobile] Connected to session ${session.id} (IP: ${clientIp})`);
     
     if (callback) {
       callback({ 
@@ -170,16 +218,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ── Screen Frame Relay (Desktop → Mobile) ──
+  // ── Screen Frame Relay (Desktop → Mobile) — Pure Zero-Lag Real-Time Passthrough ──
   socket.on('desktop:frame', (frameData) => {
     const session = findSessionBySocket(socket);
     if (session && session.mobileSocketId) {
       session.lastActivity = Date.now();
-      io.to(session.mobileSocketId).emit('screen:frame', frameData);
+      io.to(session.mobileSocketId).volatile.emit('screen:frame', frameData);
     }
   });
 
-  // ── Screen Frame ACK (Mobile → Desktop) for Flow Control ──
+  // ── Screen Frame ACK (Mobile → Desktop) — Lockstep Pacing (Zero Buffer Bloat) ──
   socket.on('mobile:frameAck', () => {
     const session = findSessionBySocket(socket);
     if (session && session.desktopSocketId) {
@@ -384,6 +432,8 @@ io.on('connection', (socket) => {
     } else if (socket.role === 'mobile') {
       // Mobile disconnected - keep session alive for reconnect
       session.mobileSocketId = null;
+      session.mobileFrameInFlight = false;
+      session.pendingLatestFrame = null;
       io.to(session.desktopSocketId).emit('mobile:disconnected');
       console.log(`[Mobile] Disconnected from session ${session.id}`);
     }
@@ -397,28 +447,34 @@ function findSessionBySocket(socket) {
   return sessions.get(socket.sessionCode);
 }
 
-// Clean up stale sessions every 5 minutes
+// Clean up truly abandoned sessions every 5 minutes (never expire while desktop is running)
 setInterval(() => {
   const now = Date.now();
-  const STALE_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours
 
   for (const [code, session] of sessions) {
     const isDesktopAlive = session.desktopSocketId && io.sockets.sockets.has(session.desktopSocketId);
-    const shouldRemove = !isDesktopAlive 
-      ? (now - session.lastActivity > 10 * 60 * 1000) 
-      : (now - session.lastActivity > STALE_TIMEOUT);
+    
+    // As long as the laptop/desktop agent is running, NEVER expire or remove the session
+    if (isDesktopAlive) {
+      continue;
+    }
 
-    if (shouldRemove) {
-      console.log(`[Cleanup] Removing stale session: ${session.id}`);
-      
-      if (session.desktopSocketId) {
-        io.to(session.desktopSocketId).emit('session:ended', { reason: 'Session timed out' });
-      }
+    // Only clean up if desktop has been disconnected for more than 1 hour
+    const isAbandoned = !isDesktopAlive && (now - session.lastActivity > 60 * 60 * 1000);
+
+    if (isAbandoned) {
+      console.log(`[Cleanup] Removing abandoned session ${session.id}`);
       if (session.mobileSocketId) {
-        io.to(session.mobileSocketId).emit('session:ended', { reason: 'Session timed out' });
+        io.to(session.mobileSocketId).emit('session:ended', { reason: 'Desktop disconnected' });
       }
-      
       sessions.delete(code);
+    }
+  }
+
+  // Clean expired rate-limit lockouts
+  for (const [ip, attempt] of connectAttempts) {
+    if (attempt.lockedUntil && now > attempt.lockedUntil + 60000) {
+      connectAttempts.delete(ip);
     }
   }
 }, 5 * 60 * 1000);
@@ -437,6 +493,29 @@ function getNetworkIps() {
   return ips;
 }
 
+// ─── Robust Error & Crash Resilience ─────────────────────────────────────────
+
+server.on('error', (err) => {
+  console.error('[Relay Server Error]:', err.message);
+});
+
+server.on('clientError', (err, socket) => {
+  if (err.code === 'ECONNRESET' || !socket || !socket.writable) return;
+  socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+});
+
+io.engine.on('connection_error', (err) => {
+  // Suppress transient proxy connection resets
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Relay Uncaught Exception - Recovered]:', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Relay Unhandled Rejection - Recovered]:', reason);
+});
+
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3000;
@@ -453,3 +532,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('╚══════════════════════════════════════════════════════════╝');
   console.log('');
 });
+
